@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import textwrap
 from datetime import datetime
 from typing import TYPE_CHECKING
@@ -55,7 +56,11 @@ class NoticeHandle:
             image_path = await download_file(image_url, temp_path)
             if not image_path:
                 return "图片获取失败"
-            kwargs["image"] = str(image_path)
+            # SnowLuma 与 AstrBot 可能不在同一文件系统，传本地路径会找不到文件；
+            # 统一用 OneBot 的 base64:// 形式传给 OneBot 端。
+            kwargs["image"] = (
+                "base64://" + base64.b64encode(image_path.read_bytes()).decode()
+            )
 
         await event.bot._send_group_notice(**kwargs)
         event.stop_event()

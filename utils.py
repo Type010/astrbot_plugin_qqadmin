@@ -1,6 +1,8 @@
 import os
+import shutil
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 from aiohttp import ClientSession
 
@@ -77,20 +79,35 @@ def format_time(timestamp):
 
 
 async def download_file(url: str, save_path: Path) -> Path | None:
-    """下载文件并保存到本地"""
-    url = url.replace("https://", "http://")
+    """下载或复制文件到本地，兼容 AstrBot 预处理后的本地路径与 file:// URI"""
+    source_path: Path | None = None
+    if url.startswith("file://"):
+        source_path = Path(unquote(urlparse(url).path))
+    elif not url.startswith(("http://", "https://")):
+        # AstrBot preprocess_stage 会把 Image.url 改写成 /AstrBot/data/temp/...
+        source_path = Path(url)
+
     try:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+        if source_path is not None:
+            if not source_path.is_file():
+                logger.error(f"本地图片不存在: {source_path}")
+                return None
+            shutil.copyfile(source_path, save_path)
+            logger.info(f"文件已保存: {save_path}")
+            return save_path
+
+        url = url.replace("https://", "http://")
         async with ClientSession() as client:
             response = await client.get(url)
             file = await response.read()
 
-            os.makedirs(os.path.dirname(save_path), exist_ok=True)
-
             with open(save_path, "wb") as img_file:
                 img_file.write(file)
 
-            logger.info(f"文件已保存: {save_path}")
-            return save_path
+        logger.info(f"文件已保存: {save_path}")
+        return save_path
     except Exception as e:
         logger.error(f"文件下载并保存失败: {e}")
         return None
