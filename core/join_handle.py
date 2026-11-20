@@ -34,17 +34,35 @@ class JoinHandle:
 
     # -----------修改配置-----------------
 
+    async def _handle_bool_setting(
+        self,
+        event: AiocqhttpMessageEvent,
+        field: str,
+        label: str,
+        mode_str: str | bool | None,
+    ):
+        """布尔配置：无参数只查询，不把空参数误判成关闭。"""
+        gid = event.get_group_id()
+        text = "" if mode_str is None else str(mode_str).strip()
+        if not text:
+            status = await self.db.get(gid, field)
+            await event.send(event.plain_result(f"{label}：{status}"))
+            return
+        mode = parse_bool(text, default=None)  # type: ignore[arg-type]
+        if mode is None:
+            await event.send(
+                event.plain_result(f"{label}：请使用 开/关 设置")
+            )
+            return
+        await self.db.set(gid, field, mode)
+        await event.send(event.plain_result(f"{label}已设为：{mode}"))
+
     async def handle_join_review(
         self, event: AiocqhttpMessageEvent, mode_str: str | bool | None
     ):
-        gid = event.get_group_id()
-        mode = parse_bool(mode_str)
-        if isinstance(mode, bool):
-            await self.db.set(gid, "join_switch", mode)
-            await event.send(event.plain_result(f"本群进群审核：{mode}"))
-        else:
-            status = await self.db.get(gid, "join_switch")
-            await event.send(event.plain_result(f"本群进群审核：{status}"))
+        await self._handle_bool_setting(
+            event, "join_switch", "本群进群审核", mode_str
+        )
 
     async def handle_accept_words(self, event: AiocqhttpMessageEvent):
         gid = event.get_group_id()
@@ -71,14 +89,9 @@ class JoinHandle:
     async def handle_no_match_reject(
         self, event: AiocqhttpMessageEvent, mode_str: str | bool | None
     ):
-        gid = event.get_group_id()
-        mode = parse_bool(mode_str)
-        if isinstance(mode, bool):
-            await self.db.set(gid, "join_no_match_reject", mode)
-            await event.send(event.plain_result(f"本群未命中白词驳回已设为：{mode}"))
-        else:
-            status = await self.db.get(gid, "join_no_match_reject")
-            await event.send(event.plain_result(f"本群未命中白词驳回：{status}"))
+        await self._handle_bool_setting(
+            event, "join_no_match_reject", "本群未命中白词驳回", mode_str
+        )
 
     async def handle_join_min_level(
         self, event: AiocqhttpMessageEvent, level: int | None
@@ -184,24 +197,14 @@ class JoinHandle:
             )
 
     async def handle_leave_notify(self, event: AiocqhttpMessageEvent, mode_str):
-        gid = event.get_group_id()
-        mode = parse_bool(mode_str)
-        if isinstance(mode, bool):
-            await self.db.set(gid, "leave_notify", mode)
-            await event.send(event.plain_result(f"本群退群通知已设为：{mode}"))
-        else:
-            status = await self.db.get(gid, "leave_notify")
-            await event.send(event.plain_result(f"本群退群通知：{status}"))
+        await self._handle_bool_setting(
+            event, "leave_notify", "本群退群通知", mode_str
+        )
 
     async def handle_leave_block(self, event: AiocqhttpMessageEvent, mode_str):
-        gid = event.get_group_id()
-        mode = parse_bool(mode_str)
-        if isinstance(mode, bool):
-            await self.db.set(gid, "leave_block", mode)
-            await event.send(event.plain_result(f"本群退群拉黑已设为：{mode}"))
-        else:
-            status = await self.db.get(gid, "leave_block")
-            await event.send(event.plain_result(f"本群退群拉黑：{status}"))
+        await self._handle_bool_setting(
+            event, "leave_block", "本群退群拉黑", mode_str
+        )
 
     # ---------辅助函数-----------------
     async def should_approve(
