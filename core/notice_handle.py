@@ -8,10 +8,17 @@ from astrbot.api import logger
 from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import (
     AiocqhttpMessageEvent,
 )
-from astrbot.core.utils.message_send_policy import (
-    SUPPRESSED_TOOL_RESULT,
-    should_suppress_event_send,
-)
+try:
+    from astrbot.core.utils.message_send_policy import (
+        SUPPRESSED_TOOL_RESULT,
+        should_suppress_event_send,
+    )
+except ImportError:
+    # AstrBot 4.29.x 没有 message_send_policy；退化为不拦截发送。
+    SUPPRESSED_TOOL_RESULT = "消息发送已被拦截"
+
+    def should_suppress_event_send(event) -> bool:
+        return False
 
 from ..config import PluginConfig
 from ..utils import download_file, extract_image_url
@@ -39,7 +46,7 @@ class NoticeHandle:
         if should_suppress_event_send(event):
             return SUPPRESSED_TOOL_RESULT
         gid = event.get_group_id()
-        image_path = ""
+        kwargs = {"group_id": int(gid), "content": content}
         if image_url := (image_url or extract_image_url(chain=event.get_messages())):
             img_name = f"{gid}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
             temp_path = self.cfg.group_notice_dir / img_name
@@ -48,12 +55,9 @@ class NoticeHandle:
             image_path = await download_file(image_url, temp_path)
             if not image_path:
                 return "图片获取失败"
+            kwargs["image"] = str(image_path)
 
-            await event.bot._send_group_notice(
-                group_id=int(event.get_group_id()),
-                content=content,
-                image=str(image_path),
-            )
+        await event.bot._send_group_notice(**kwargs)
         event.stop_event()
         return "群公告已发布"
 
