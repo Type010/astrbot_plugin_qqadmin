@@ -1,6 +1,7 @@
 from aiocqhttp import CQHttp
 
 from astrbot.api import logger
+from astrbot.core.message.components import At, Plain
 from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import (
     AiocqhttpMessageEvent,
 )
@@ -358,7 +359,21 @@ class JoinHandle:
                     logger.warning("进群欢迎语格式有误，仅支持 {nickname}")
                     welcome = ""
                 if welcome:
-                    await event.send(event.plain_result(welcome))
+                    target = str(uid).strip()
+                    if target.isdigit() and target != "0":
+                        try:
+                            await event.send(
+                                event.chain_result(
+                                    [At(qq=target), Plain(f" {welcome}")]
+                                )
+                            )
+                        except Exception as exc:
+                            logger.warning(
+                                f"进群欢迎 @ 成员失败，改为纯文本: {exc}"
+                            )
+                            await event.send(event.plain_result(welcome))
+                    else:
+                        await event.send(event.plain_result(welcome))
             # 进群禁言
             join_ban_time = await self.db.get(gid, "join_ban_time")
             if join_ban_time > 0:
