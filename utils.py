@@ -13,6 +13,34 @@ from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import (
 )
 
 
+async def safe_send(
+    event: AiocqhttpMessageEvent,
+    message,
+    *,
+    context: str = "发送消息",
+) -> bool:
+    """群发消息的安全封装。
+
+    SnowLuma 在收到 result=0 但没有 groupSequence 时会抛
+    `group message delivery was not confirmed`。这种情况下消息可能已经发出，
+    也可能没有发出；对群管通知不应让异常中断整个管理操作。
+    """
+    try:
+        await event.send(message)
+        return True
+    except Exception as exc:
+        detail = str(exc)
+        if "group message delivery was not confirmed" in detail:
+            logger.warning(
+                "[qqadmin] %s：群消息回执缺失，按已发送处理并继续。%s",
+                context,
+                detail,
+            )
+            return True
+        logger.error("[qqadmin] %s 发送失败：%s", context, exc)
+        return False
+
+
 async def get_nickname(event: AiocqhttpMessageEvent, user_id: int | str) -> str:
     """获取指定群友的群昵称或 Q 名，群接口失败/空结果自动降级到陌生人资料"""
     user_id = int(user_id)

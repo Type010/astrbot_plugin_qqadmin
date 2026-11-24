@@ -4,13 +4,12 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from astrbot.api import logger
-from astrbot.core.message.components import At
 from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import (
     AiocqhttpMessageEvent,
 )
 from astrbot.core.utils.session_waiter import SessionController, session_waiter
 
-from ..utils import format_time, get_nickname
+from ..utils import format_time, get_nickname, safe_send
 
 if TYPE_CHECKING:
     from ..main import QQAdminPlugin
@@ -54,7 +53,11 @@ class MemberHandle:
         try:
             members_data = await event.bot.get_group_member_list(group_id=int(group_id))
         except Exception as e:
-            await event.send(event.plain_result(f"获取群成员信息失败：{e}"))
+            await safe_send(
+                event,
+                event.plain_result(f"获取群成员信息失败：{e}"),
+                context="清理群友获取成员失败",
+            )
             return
 
         threshold_ts = int(datetime.now().timestamp()) - inactive_days * 86400
@@ -75,7 +78,11 @@ class MemberHandle:
                 )
 
         if not clear_ids:
-            await event.send(event.plain_result("无符合条件的群友"))
+            await safe_send(
+                event,
+                event.plain_result("无符合条件的群友"),
+                context="清理群友无匹配",
+            )
             return
 
         # 按发言时间排序
@@ -87,10 +94,36 @@ class MemberHandle:
             + "\n\n### 请发送 **确认清理** 或 **取消清理** 来处理这些群友！"
         )
 
-        url = await self.plugin.text_to_image(info_str)
-        await event.send(event.image_result(url))
+        preview_sent = False
+        try:
+            url = await self.plugin.text_to_image(info_str)
+            preview_sent = await safe_send(
+                event,
+                event.image_result(url),
+                context="清理群友预览",
+            )
+        except Exception as e:
+            logger.error("清理群友预览图生成失败：%s", e)
 
-        await event.send(event.chain_result([At(qq=cid) for cid in clear_ids]))
+        if not preview_sent:
+            lines = info_str.splitlines()
+            for i in range(0, len(lines), 20):
+                await safe_send(
+                    event,
+                    event.plain_result("\n".join(lines[i : i + 20])),
+                    context="清理群友预览文本",
+                )
+
+        # 不再发送整段 At 链：人数多时 At 链会非常长，SnowLuma 容易拿不到
+        # groupSequence 而抛 ActionFailed，导致后面的确认等待根本无法开始。
+        await safe_send(
+            event,
+            event.plain_result(
+                f"共 {len(clear_ids)} 人待处理，"
+                "请发送 确认清理 或 取消清理。"
+            ),
+            context="清理群友确认提示",
+        )
 
         @session_waiter(timeout=60)  # type: ignore
         async def empty_mention_waiter(
@@ -100,7 +133,11 @@ class MemberHandle:
                 return
 
             if event.message_str == "取消清理":
-                await event.send(event.plain_result("清理群友任务已取消"))
+                await safe_send(
+                    event,
+                    event.plain_result("清理群友任务已取消"),
+                    context="取消清理提示",
+                )
                 controller.stop()
                 return
 
@@ -120,13 +157,23 @@ class MemberHandle:
                         logger.error(f"踢出 {target_name}({clear_id}) 失败：{e}")
 
                 if msg_list:
-                    await event.send(event.plain_result("\n".join(msg_list)))
+                    # 分块发送，避免一次性发送超长结果时回执缺失或消息被拒。
+                    for i in range(0, len(msg_list), 20):
+                        await safe_send(
+                            event,
+                            event.plain_result("\n".join(msg_list[i : i + 20])),
+                            context="清理群友结果",
+                        )
                 controller.stop()
 
         try:
             await empty_mention_waiter(event)
         except TimeoutError as _:
-            await event.send(event.plain_result("等待超时！"))
+            await safe_send(
+                event,
+                event.plain_result("等待超时！"),
+                context="清理群友超时提示",
+            )
         except Exception as e:
             logger.error("清理群友任务出错: " + str(e))
         finally:
